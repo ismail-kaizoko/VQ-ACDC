@@ -18,3 +18,5 @@ env/
 #ignore the folder garbage
 garbage/
 lucidrains_vqs/test.ipynb
+
+checkpoints/
