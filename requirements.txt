@@ -1,0 +1,9 @@
+torch>=1.10
+torchvision
+numpy
+matplotlib
+tqdm
+torchio
+SimpleITK
+scikit-learn
+vector_quantize_pytorch

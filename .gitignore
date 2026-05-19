@@ -20,3 +20,5 @@ garbage/
 lucidrains_vqs/test.ipynb
 
 checkpoints/
+
+.claude
