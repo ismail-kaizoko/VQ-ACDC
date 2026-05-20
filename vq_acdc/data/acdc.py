@@ -144,3 +144,71 @@ class MinMaxNormalize:
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         lo, hi = x.min(), x.max()
         return (x - lo) / (hi - lo + 1e-8) * (self.out_max - self.out_min) + self.out_min
+
+
+# ── Structured (per-patient) loading ──────────────────────────────────────────
+
+def _load_patient_structured(path: str, modality: str) -> dict:
+    """
+    Loads one patient organised by spatial slice position.
+
+    The ACDC 3D volume has N short-axis planes (apex → base).
+    Returns:
+        {
+          'patient': pid,          # e.g. '001'
+          'slices':  [             # length = N (number of spatial planes)
+              [ed_plane_0, es_plane_0],   # position 0 — both cardiac phases
+              [ed_plane_1, es_plane_1],   # position 1
+              ...
+          ]
+        }
+
+    Each plane is a raw [H, W] tensor (no transforms).
+    Different patients may have different N; both phases always have the same N.
+    """
+    if modality not in ('SEG', 'MRI'):
+        raise ValueError(f"modality must be 'SEG' or 'MRI', got '{modality}'")
+
+    files = os.listdir(path)
+    gt_files = [f for f in files if f.endswith('_gt.nii.gz')]
+    frames = sorted(set(f.split('_')[1].split('.')[0] for f in gt_files))
+    ed_frame, es_frame = frames[0], frames[-1]
+
+    pid = path[-3:]
+    ed_gt = tio.LabelMap(os.path.join(path, f"patient{pid}_{ed_frame}_gt.nii.gz"))
+    es_gt = tio.LabelMap(os.path.join(path, f"patient{pid}_{es_frame}_gt.nii.gz"))
+
+    def _to_slices(gt_vol, img_vol=None):
+        seg = gt_vol.data.squeeze(0).permute(2, 0, 1)
+        img = img_vol.data.squeeze(0).permute(2, 0, 1).float() if img_vol else None
+        return list(_crop_to_roi(seg, img).unbind(0))   # list of N [H, W] tensors
+
+    if modality == 'SEG':
+        ed_slices = _to_slices(ed_gt)
+        es_slices = _to_slices(es_gt)
+    else:
+        ed_mri = tio.LabelMap(os.path.join(path, f"patient{pid}_{ed_frame}.nii.gz"))
+        es_mri = tio.LabelMap(os.path.join(path, f"patient{pid}_{es_frame}.nii.gz"))
+        ed_slices = _to_slices(ed_gt, ed_mri)
+        es_slices = _to_slices(es_gt, es_mri)
+
+    # zip so index k = spatial position k in the 3D stack
+    return {
+        'patient': pid,
+        'slices':  [[ed, es] for ed, es in zip(ed_slices, es_slices)],
+    }
+
+
+def load_dataset_per_patient(path: str, modality: str = 'SEG') -> list:
+    """
+    Loads the dataset preserving spatial structure.
+
+    Returns a list of dicts, one per patient:
+        [{'patient': '001', 'slices': [[ed_0, es_0], [ed_1, es_1], ...]}, ...]
+
+    slices[k] contains the ED and ES 2D planes at spatial position k in the
+    3D short-axis stack (apex → base). Use this when you need per-position
+    statistics across all patients (e.g. per-slice codebook analysis).
+    """
+    patients = sorted(p for p in os.listdir(path) if os.path.isdir(os.path.join(path, p)))
+    return [_load_patient_structured(os.path.join(path, p), modality) for p in patients]
