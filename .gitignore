@@ -1,22 +1,11 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[cod]
 
-# Virtual environments
-venv/
-env/
-
-# Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
-# Logs
 *.log
-
-# Environment variables
 .env
 
-#ignore the folder garbage
-garbage/
-lucidrains_vqs/test.ipynb
-
 checkpoints/
+.claude/
+.venv/
+old/
