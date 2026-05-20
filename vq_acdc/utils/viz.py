@@ -38,7 +38,11 @@ def show_mri_batch(batch: Tensor, title: str = '', n: int = 8):
 def show_errors(true_seg: Tensor, pred_seg: Tensor, title: str = '', n: int = 8):
     """Shows ground truth, prediction, and pixel error map side by side."""
     n = min(n, true_seg.shape[0])
-    error = (true_seg != pred_seg).float()
+
+    true_seg = torch.argmax(true_seg,     dim=1).detach().cpu()
+    pred_seg = torch.argmax(pred_seg, dim=1).detach().cpu()
+
+    error = (true_seg != pred_seg)*1
     fig, axes = plt.subplots(n, 3, figsize=(8, 3 * n))
     fig.suptitle(title, fontsize=13)
     for i in range(n):
