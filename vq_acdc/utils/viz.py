@@ -68,104 +68,59 @@ def plot_losses(train: list, val: list, title: str = 'Training curves'):
     plt.legend(); plt.grid(); plt.tight_layout(); plt.show()
 
 
-def plot_codebook_per_slice(
-    per_slice_hists: List[np.ndarray],
+def plot_index_histograms(
+    hists_per_frame: List[np.ndarray],
     K: int,
     patient_counts: Optional[List[int]] = None,
-    title: str = 'Codebook usage per slice position',
+    title: str = 'Codebook index usage per frame',
     save_path: Optional[str] = None,
 ):
     """
-    Visualises codebook index usage broken down by anatomical slice position.
+    Bar chart of codebook index usage, one subplot per frame number.
 
-    Each element of per_slice_hists is a [K] array counting how many times each
-    codebook entry was selected across all patients at that slice position.
-    Slices are ordered as loaded (typically apex → base or base → apex).
+    For each spatial position k, shows a bar plot with K bars:
+        x-axis — codebook index  (0 … K-1)
+        y-axis — total count across all patients at that frame position
 
     Args:
-        per_slice_hists : list of length n_slices, each a np.ndarray of shape [K].
-        K               : total codebook size (for reference lines).
-        patient_counts  : optional list of length n_slices — number of patients
-                          that contributed to each position (shown as annotations).
-        title           : figure title.
-        save_path       : if given, saves the figure to this path instead of showing.
-
-    Layout (3 columns):
-        Left   — heatmap:  log(1 + count) per slice × codebook index.
-        Centre — active codes per slice: how many indices have count > 0.
-        Right  — entropy per slice: Shannon entropy of the code distribution
-                 (high = uniform use, low = few dominant codes).
+        hists_per_frame : list of length n_frames, each np.ndarray [K].
+        K               : codebook size.
+        patient_counts  : optional list of ints — patients contributing to each frame.
+        title           : figure suptitle.
+        save_path       : save figure here if given, else display.
     """
-    n_slices = len(per_slice_hists)
-    matrix = np.stack(per_slice_hists)           # [n_slices, K]
+    n = len(hists_per_frame)
+    n_cols = min(2, n)
+    n_rows = (n + n_cols - 1) // n_cols
 
-    # ── derived statistics ─────────────────────────────────────────────────────
-    active = (matrix > 0).sum(axis=1)            # [n_slices]  int
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(5 * n_cols, 3 * n_rows),
+                             sharex=True)
+    fig.suptitle(title, fontsize=13, fontweight='bold')
 
-    # Shannon entropy H = -sum(p * log2(p)), ignoring zero counts
-    probs = matrix / (matrix.sum(axis=1, keepdims=True) + 1e-12)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        log_p  = np.where(probs > 0, np.log2(probs), 0.0)
-    entropy = -(probs * log_p).sum(axis=1)       # [n_slices]
+    axes_flat = np.array(axes).reshape(-1) if n > 1 else [axes]
+    x = np.arange(K)
 
-    # ── figure ────────────────────────────────────────────────────────────────
-    fig_h = max(5, n_slices * 0.45)
-    fig, axes = plt.subplots(1, 3, figsize=(18, fig_h),
-                             gridspec_kw={'width_ratios': [3, 1, 1]})
-    fig.suptitle(title, fontsize=14, fontweight='bold')
+    for k, (hist, ax) in enumerate(zip(hists_per_frame, axes_flat)):
+        ax.bar(x, hist, width=1.0, color='steelblue', linewidth=0)
+        n_pat = f'  n={patient_counts[k]}' if patient_counts is not None else ''
+        ax.set_title(f'frame {k}{n_pat}', fontsize=9)
+        ax.set_xlim(0, K)
+        ax.tick_params(labelsize=7)
+        active = int((hist > 0).sum())
+        ax.text(0.98, 0.95, f'{active}/{K} active',
+                transform=ax.transAxes, ha='right', va='top',
+                fontsize=7, color='tomato')
 
-    slice_labels = [f"s{i}" for i in range(n_slices)]
+    for ax in axes_flat[n:]:
+        ax.set_visible(False)
 
-    # ── left: usage heatmap ────────────────────────────────────────────────────
-    ax = axes[0]
-    im = ax.imshow(np.log1p(matrix), aspect='auto', cmap='viridis',
-                   interpolation='nearest', origin='upper')
-    ax.set_xlabel('Codebook index', fontsize=11)
-    ax.set_ylabel('Slice position', fontsize=11)
-    ax.set_yticks(range(n_slices))
-    ax.set_yticklabels(slice_labels, fontsize=8)
-    ax.set_title('log(1 + count)  [slice × code]', fontsize=11)
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    # ── centre: active codes per slice ────────────────────────────────────────
-    ax = axes[1]
-    bars = ax.barh(range(n_slices), active, color='steelblue', height=0.7)
-    ax.axvline(K, color='tomato', linestyle='--', linewidth=1.2,
-               label=f'K={K}')
-    ax.set_xlabel('Active codes', fontsize=11)
-    ax.set_xlim(0, K * 1.05)
-    ax.set_yticks(range(n_slices))
-    ax.set_yticklabels(slice_labels, fontsize=8)
-    ax.invert_yaxis()
-    ax.set_title('Active codes / slice', fontsize=11)
-    ax.legend(fontsize=9)
-
-    # annotate patient counts if provided
-    if patient_counts is not None:
-        for i, (bar, cnt) in enumerate(zip(bars, patient_counts)):
-            ax.text(bar.get_width() + K * 0.01, i,
-                    f'n={cnt}', va='center', fontsize=7, color='gray')
-
-    # ── right: entropy per slice ───────────────────────────────────────────────
-    ax = axes[2]
-    ax.barh(range(n_slices), entropy, color='darkorange', height=0.7)
-    max_entropy = np.log2(K)
-    ax.axvline(max_entropy, color='tomato', linestyle='--', linewidth=1.2,
-               label=f'log₂(K)={max_entropy:.1f}')
-    ax.set_xlabel('Shannon entropy (bits)', fontsize=11)
-    ax.set_xlim(0, max_entropy * 1.05)
-    ax.set_yticks(range(n_slices))
-    ax.set_yticklabels(slice_labels, fontsize=8)
-    ax.invert_yaxis()
-    ax.set_title('Code entropy / slice', fontsize=11)
-    ax.legend(fontsize=9)
-
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.supxlabel('Codebook index', fontsize=10)
+    fig.supylabel('Count', fontsize=10)
+    plt.tight_layout(rect=[0.02, 0.02, 1, 0.96])
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Figure saved → {save_path}")
     else:
         plt.show()
-
-
